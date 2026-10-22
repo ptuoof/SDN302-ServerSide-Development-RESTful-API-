@@ -1,0 +1,248 @@
+{
+  "info": {
+    "name": "CookFlow - SDN302 RESTful API Collection",
+    "description": "Postman Collection for CookFlow Backend (NodeJS + Express + MongoDB) - SDN302 FPT University",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:9999",
+      "type": "string"
+    },
+    {
+      "key": "token",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Authentication",
+      "item": [
+        {
+          "name": "Login (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"usernameOrEmail\": \"admin@cookflow.com\",\n  \"password\": \"123456\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/api/auth/login", "host": ["{{baseUrl}}"], "path": ["api", "auth", "login"] }
+          }
+        },
+        {
+          "name": "Login (Chef / User)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"usernameOrEmail\": \"chef@cookflow.com\",\n  \"password\": \"123456\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/api/auth/login", "host": ["{{baseUrl}}"], "path": ["api", "auth", "login"] }
+          }
+        },
+        {
+          "name": "Register New User",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"student_se181964\",\n  \"email\": \"student@fpt.edu.vn\",\n  \"password\": \"123456\",\n  \"fullName\": \"Sinh Viên FPT\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/api/auth/register", "host": ["{{baseUrl}}"], "path": ["api", "auth", "register"] }
+          }
+        },
+        {
+          "name": "Get Profile (Me)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": { "raw": "{{baseUrl}}/api/auth/me", "host": ["{{baseUrl}}"], "path": ["api", "auth", "me"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Categories",
+      "item": [
+        {
+          "name": "Get All Categories",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/api/categories", "host": ["{{baseUrl}}"], "path": ["api", "categories"] }
+          }
+        },
+        {
+          "name": "Create Category (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Món Lẩu 🍲\",\n  \"slug\": \"mon-lau\",\n  \"icon\": \"🍲\",\n  \"order\": 6\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/api/categories", "host": ["{{baseUrl}}"], "path": ["api", "categories"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Recipes",
+      "item": [
+        {
+          "name": "Get All Recipes (with filter & search)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/recipes?category=Tất cả&search=",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "recipes"],
+              "query": [
+                { "key": "category", "value": "Tất cả" },
+                { "key": "search", "value": "" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Recipe by ID",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/api/recipes/:id", "host": ["{{baseUrl}}"], "path": ["api", "recipes", ":id"] }
+          }
+        },
+        {
+          "name": "Create Recipe",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Canh Rong Biển Thịt Bò\",\n  \"description\": \"Món canh thanh mát bồi bổ sức khỏe chuẩn vị Hàn.\",\n  \"imageUrl\": \"https://images.unsplash.com/photo-1547592180-85f173990554?auto=format&fit=crop&w=800&q=80\",\n  \"categoryName\": \"Món chính 🍲\",\n  \"prepTimeMinutes\": 10,\n  \"cookTimeMinutes\": 15,\n  \"servings\": 3,\n  \"calories\": 210,\n  \"difficulty\": \"Dễ\",\n  \"ingredients\": [\n    { \"name\": \"Rong biển khô\", \"amount\": \"20\", \"unit\": \"gram\", \"group\": \"Nguyên liệu chính\" },\n    { \"name\": \"Thịt bò băm\", \"amount\": \"150\", \"unit\": \"gram\", \"group\": \"Nguyên liệu chính\" }\n  ],\n  \"steps\": [\n    { \"stepNumber\": 1, \"title\": \"Ngâm nở rong biển\", \"instruction\": \"Ngâm rong biển trong nước lạnh 15 phút.\", \"timerSeconds\": 900 },\n    { \"stepNumber\": 2, \"title\": \"Xào thịt bò và nấu canh\", \"instruction\": \"Xào thơm thịt bò với dầu mè rồi cho nước và rong biển vào đun sôi.\", \"timerSeconds\": 600 }\n  ]\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/api/recipes", "host": ["{{baseUrl}}"], "path": ["api", "recipes"] }
+          }
+        },
+        {
+          "name": "Get My Created Recipes",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": { "raw": "{{baseUrl}}/api/recipes/my/created", "host": ["{{baseUrl}}"], "path": ["api", "recipes", "my", "created"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Favorites",
+      "item": [
+        {
+          "name": "Get Favorites",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": { "raw": "{{baseUrl}}/api/favorites", "host": ["{{baseUrl}}"], "path": ["api", "favorites"] }
+          }
+        },
+        {
+          "name": "Toggle Favorite",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": { "raw": "{{baseUrl}}/api/favorites/:recipeId/toggle", "host": ["{{baseUrl}}"], "path": ["api", "favorites", ":recipeId", "toggle"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. Shopping List",
+      "item": [
+        {
+          "name": "Get Shopping List",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": { "raw": "{{baseUrl}}/api/shopping", "host": ["{{baseUrl}}"], "path": ["api", "shopping"] }
+          }
+        },
+        {
+          "name": "Add Custom Item",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Sữa tươi Vinamilk\",\n  \"amount\": \"1\",\n  \"unit\": \"hộp 1L\",\n  \"recipeTitle\": \"Mua tự do\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/api/shopping", "host": ["{{baseUrl}}"], "path": ["api", "shopping"] }
+          }
+        },
+        {
+          "name": "Toggle Item Checked",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": { "raw": "{{baseUrl}}/api/shopping/:id/toggle", "host": ["{{baseUrl}}"], "path": ["api", "shopping", ":id", "toggle"] }
+          }
+        },
+        {
+          "name": "Clear Checked Items",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": { "raw": "{{baseUrl}}/api/shopping/clear-checked", "host": ["{{baseUrl}}"], "path": ["api", "shopping", "clear-checked"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "6. Pantry Finder",
+      "item": [
+        {
+          "name": "Get Pantry Ingredients",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": { "raw": "{{baseUrl}}/api/pantry", "host": ["{{baseUrl}}"], "path": ["api", "pantry"] }
+          }
+        },
+        {
+          "name": "Toggle Pantry Ingredient",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ingredientName\": \"Trứng gà ta\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/api/pantry/toggle", "host": ["{{baseUrl}}"], "path": ["api", "pantry", "toggle"] }
+          }
+        },
+        {
+          "name": "Suggest Recipes Based on Pantry",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": { "raw": "{{baseUrl}}/api/pantry/suggest-recipes", "host": ["{{baseUrl}}"], "path": ["api", "pantry", "suggest-recipes"] }
+          }
+        }
+      ]
+    }
+  ]
+}
