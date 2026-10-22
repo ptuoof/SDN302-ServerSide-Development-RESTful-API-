@@ -2,14 +2,16 @@ const createError = require('http-errors');
 
 const authorizeRole = (...allowedRoles) => {
   return (req, res, next) => {
-    if (!req.user || !req.user.role) {
+    const role = req.user?.role || req.role;
+
+    if (!role) {
       return next(createError.Forbidden('Access denied: User role undefined'));
     }
 
-    if (!allowedRoles.includes(req.user.role)) {
+    if (!allowedRoles.includes(role)) {
       return next(
         createError.Forbidden(
-          `Access denied: Requires role [${allowedRoles.join(', ')}], but current role is [${req.user.role}]`
+          `Access denied: Requires role [${allowedRoles.join(', ')}], but current role is [${role}]`
         )
       );
     }
