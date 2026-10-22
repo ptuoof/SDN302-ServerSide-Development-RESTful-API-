@@ -1,0 +1,41 @@
+{
+  "name": "sdn302-serverside-development-restful-api",
+  "version": "1.0.0",
+  "description": "Full-fledged Server-Side RESTful API built with Node.js, Express.js, MongoDB & Mongoose (MVC Architecture, JWT Auth, RBAC, Multer File Upload) - SDN302 FPT University",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js",
+    "seed": "node seed/seedData.js",
+    "test:api": "node test/api-test.js"
+  },
+  "keywords": [
+    "nodejs",
+    "express",
+    "mongodb",
+    "mongoose",
+    "restful-api",
+    "jwt-authentication",
+    "rbac",
+    "multer",
+    "mvc-architecture",
+    "sdn302",
+    "fpt-university"
+  ],
+  "author": "SDN302 Development Team - FPT University",
+  "license": "ISC",
+  "dependencies": {
+    "bcryptjs": "^3.0.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "http-errors": "^2.0.0",
+    "jsonwebtoken": "^9.0.2",
+    "mongoose": "^8.10.1",
+    "morgan": "^1.10.0",
+    "multer": "^1.4.5-lts.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.9"
+  }
+}
