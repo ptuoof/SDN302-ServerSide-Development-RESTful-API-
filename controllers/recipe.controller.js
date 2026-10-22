@@ -2,22 +2,44 @@ const mongoose = require('mongoose');
 const createError = require('http-errors');
 const { Recipe, Category, Favorite } = require('../models');
 
-// Helper to format recipe for FE compatibility
+// Helper to format recipe for seamless FE compatibility and SDN302 standards
 const formatRecipe = recipe => {
   const obj = recipe.toObject ? recipe.toObject() : { ...recipe };
+  const catObj = obj.category && typeof obj.category === 'object' ? obj.category : null;
+  const categoryString = catObj
+    ? catObj.name
+    : typeof obj.category === 'string'
+    ? obj.category
+    : 'Món chính 🍲';
+
+  const recipeId = obj._id ? obj._id.toString() : obj.id;
+
   return {
     ...obj,
-    id: obj._id.toString(),
-    categoryName: obj.category?.name || 'Món chính 🍲'
+    id: recipeId,
+    _id: recipeId,
+    category: categoryString,
+    categoryObj: catObj,
+    categoryName: categoryString
   };
 };
 
-// @desc    Get all recipes with filtering & search
+// @desc    Get all recipes with filtering, search, sorting & pagination
 // @route   GET /api/recipes
 // @access  Public
 exports.getAllRecipes = async (req, res, next) => {
   try {
-    const { category, search, page = 1, limit = 50 } = req.query;
+    const {
+      category,
+      search,
+      difficulty,
+      maxCalories,
+      maxTime,
+      sort = '-createdAt',
+      page = 1,
+      limit = 50
+    } = req.query;
+
     const filter = {};
 
     // 1. Category Filter
@@ -41,6 +63,36 @@ exports.getAllRecipes = async (req, res, next) => {
       ];
     }
 
+    // 3. Difficulty Filter
+    if (difficulty && ['Dễ', 'Vừa', 'Khó'].includes(difficulty)) {
+      filter.difficulty = difficulty;
+    }
+
+    // 4. Calorie Filter
+    if (maxCalories && !isNaN(Number(maxCalories))) {
+      filter.calories = { $lte: Number(maxCalories) };
+    }
+
+    // 5. Total Cook Time Filter
+    if (maxTime && !isNaN(Number(maxTime))) {
+      filter.$expr = {
+        $lte: [{ $add: ['$prepTimeMinutes', '$cookTimeMinutes'] }, Number(maxTime)]
+      };
+    }
+
+    // Build Sorting Criteria
+    let sortCriteria = {};
+    if (sort) {
+      const parts = sort.split(',');
+      parts.forEach(part => {
+        if (part.startsWith('-')) {
+          sortCriteria[part.substring(1)] = -1;
+        } else {
+          sortCriteria[part] = 1;
+        }
+      });
+    }
+
     const skip = (Number(page) - 1) * Number(limit);
 
     const [total, recipes] = await Promise.all([
@@ -48,7 +100,7 @@ exports.getAllRecipes = async (req, res, next) => {
       Recipe.find(filter)
         .populate('category', 'name slug icon')
         .populate('author', 'fullName username avatar role')
-        .sort({ createdAt: -1 })
+        .sort(sortCriteria)
         .skip(skip)
         .limit(Number(limit))
     ]);
@@ -133,13 +185,15 @@ exports.createRecipe = async (req, res, next) => {
       return next(createError.BadRequest('Valid category is required'));
     }
 
+    const authorId = req.user?._id || req.userId;
+
     const recipe = await Recipe.create({
       title,
       description,
       imageUrl,
       videoUrl: videoUrl || '',
       category: categoryId,
-      author: req.user._id,
+      author: authorId,
       prepTimeMinutes: Number(prepTimeMinutes) || 10,
       cookTimeMinutes: Number(cookTimeMinutes) || 15,
       servings: Number(servings) || 2,
@@ -178,8 +232,11 @@ exports.updateRecipe = async (req, res, next) => {
       return next(createError.NotFound('Recipe not found'));
     }
 
+    const userId = (req.user?._id || req.userId).toString();
+    const userRole = req.user?.role || req.role;
+
     // Check ownership or admin role
-    if (recipe.author.toString() !== req.user._id.toString() && req.user.role !== 'admin') {
+    if (recipe.author.toString() !== userId && userRole !== 'admin') {
       return next(createError.Forbidden('You are not authorized to update this recipe'));
     }
 
@@ -218,8 +275,11 @@ exports.deleteRecipe = async (req, res, next) => {
       return next(createError.NotFound('Recipe not found'));
     }
 
+    const userId = (req.user?._id || req.userId).toString();
+    const userRole = req.user?.role || req.role;
+
     // Check ownership or admin role
-    if (recipe.author.toString() !== req.user._id.toString() && req.user.role !== 'admin') {
+    if (recipe.author.toString() !== userId && userRole !== 'admin') {
       return next(createError.Forbidden('You are not authorized to delete this recipe'));
     }
 
@@ -243,7 +303,8 @@ exports.deleteRecipe = async (req, res, next) => {
 // @access  Private
 exports.getMyRecipes = async (req, res, next) => {
   try {
-    const recipes = await Recipe.find({ author: req.user._id })
+    const authorId = req.user?._id || req.userId;
+    const recipes = await Recipe.find({ author: authorId })
       .populate('category', 'name slug icon')
       .populate('author', 'fullName username avatar role')
       .sort({ createdAt: -1 });
