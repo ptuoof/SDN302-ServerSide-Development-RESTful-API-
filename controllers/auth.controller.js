@@ -2,12 +2,13 @@ const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const createError = require('http-errors');
 const { User } = require('../models');
+const { getJwtSecret, getJwtExpiresIn } = require('../config/jwt');
 
 const generateToken = user => {
   return jwt.sign(
     { id: user._id, role: user.role, email: user.email },
-    process.env.JWT_SECRET || 'cookflow_sdn302_fpt_secret_key_2026',
-    { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
+    getJwtSecret(),
+    { expiresIn: getJwtExpiresIn() }
   );
 };
 
