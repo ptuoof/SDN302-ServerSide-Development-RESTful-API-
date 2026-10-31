@@ -132,7 +132,20 @@ npm run test:api
 * `GET /api/pantry/suggest-recipes`: Thuật toán tính độ trùng khớp và gợi ý món nấu được.
 
 ### 🖼️ Upload Media (`/api/upload`)
-* `POST /api/upload/image`: Upload ảnh qua Multer, lưu vào `public/uploads`.
+* `POST /api/upload/image`: Upload 1 ảnh qua Multer (field `image`), lưu vào `public/uploads`.
+* `POST /api/upload/images`: Upload nhiều ảnh cùng lúc (field `images`, tối đa 5 file, mỗi file ≤ 5MB).
+* `GET /api/upload/files`: Liệt kê các file đã upload.
+* `GET /api/upload/download/:filename`: Tải file về (trả về dạng attachment, chặn path traversal).
+
+---
+
+## 🔒 Bảo Mật & Cấu Hình
+* **JWT:** `JWT_SECRET` **bắt buộc** khai báo trong `.env`. Server sẽ không khởi động nếu thiếu. Token chỉ được gửi qua header `Authorization: Bearer <token>` (không nhận qua query string).
+* **CORS:** cấu hình qua biến `CORS_ORIGIN` (danh sách origin cách nhau bởi dấu phẩy, hoặc `*`). App mobile và Postman không gửi header Origin nên luôn được phép.
+* **Chống mass assignment:** `PUT /api/recipes/:id` và `PUT /api/categories/:id` chỉ cập nhật các trường cho phép (không thể sửa `author`, `likesCount`...).
+* **Chống RegExp injection:** từ khóa tìm kiếm được escape trước khi đưa vào `$regex`.
+* **Validation:** tất cả route POST/PUT đều được kiểm tra bằng `express-validator`.
+* **Phân trang:** `limit` tối đa 100 bản ghi mỗi trang.
 
 ---
 
