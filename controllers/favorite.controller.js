@@ -44,39 +44,52 @@ exports.getFavorites = async (req, res, next) => {
 exports.toggleFavorite = async (req, res, next) => {
   try {
     const { recipeId } = req.params;
-    const recipe = await Recipe.findById(recipeId);
+    const recipeExists = await Recipe.exists({ _id: recipeId });
 
-    if (!recipe) {
+    if (!recipeExists) {
       return next(createError.NotFound('Recipe not found'));
     }
 
-    const existing = await Favorite.findOne({
+    // Atomic operations: remove if exists, otherwise create.
+    // likesCount is updated with $inc so concurrent requests stay consistent.
+    const removed = await Favorite.findOneAndDelete({
       user: req.user._id,
       recipe: recipeId
     });
 
     let isFavorite = false;
+    let updatedRecipe;
 
-    if (existing) {
-      await Favorite.findByIdAndDelete(existing._id);
-      recipe.likesCount = Math.max(0, (recipe.likesCount || 1) - 1);
-      await recipe.save();
+    if (removed) {
+      updatedRecipe = await Recipe.findOneAndUpdate(
+        { _id: recipeId, likesCount: { $gt: 0 } },
+        { $inc: { likesCount: -1 } },
+        { new: true }
+      );
       isFavorite = false;
     } else {
+      // Unique index (user + recipe) rejects duplicates created concurrently
       await Favorite.create({
         user: req.user._id,
         recipe: recipeId
       });
-      recipe.likesCount = (recipe.likesCount || 0) + 1;
-      await recipe.save();
+      updatedRecipe = await Recipe.findByIdAndUpdate(
+        recipeId,
+        { $inc: { likesCount: 1 } },
+        { new: true }
+      );
       isFavorite = true;
+    }
+
+    if (!updatedRecipe) {
+      updatedRecipe = await Recipe.findById(recipeId);
     }
 
     res.status(200).json({
       success: true,
       recipeId,
       isFavorite,
-      likesCount: recipe.likesCount,
+      likesCount: updatedRecipe?.likesCount || 0,
       message: isFavorite ? 'Added to favorites' : 'Removed from favorites'
     });
   } catch (error) {

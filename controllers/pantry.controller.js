@@ -1,5 +1,6 @@
 const createError = require('http-errors');
 const { PantryItem, Recipe } = require('../models');
+const escapeRegex = require('../utils/escapeRegex');
 
 // @desc    Get user's pantry ingredients
 // @route   GET /api/pantry
@@ -25,14 +26,14 @@ exports.getPantry = async (req, res, next) => {
 exports.togglePantryItem = async (req, res, next) => {
   try {
     const { ingredientName } = req.body;
-    if (!ingredientName || !ingredientName.trim()) {
+    if (typeof ingredientName !== 'string' || !ingredientName.trim()) {
       return next(createError.BadRequest('Ingredient name is required'));
     }
 
     const trimmedName = ingredientName.trim();
     const existing = await PantryItem.findOne({
       user: req.user._id,
-      ingredientName: { $regex: new RegExp(`^${trimmedName}$`, 'i') }
+      ingredientName: { $regex: `^${escapeRegex(trimmedName)}$`, $options: 'i' }
     });
 
     let action = '';

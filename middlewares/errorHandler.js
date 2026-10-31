@@ -23,6 +23,17 @@ const errorHandler = (err, req, res, next) => {
     message = `Duplicate value entered for ${field} field. Please choose another value.`;
   }
 
+  // Handle Multer upload errors (file too large, too many files, wrong field name)
+  if (err.name === 'MulterError') {
+    statusCode = 400;
+    const multerMessages = {
+      LIMIT_FILE_SIZE: 'File is too large. Maximum size is 5MB',
+      LIMIT_FILE_COUNT: 'Too many files uploaded',
+      LIMIT_UNEXPECTED_FILE: `Unexpected file field: ${err.field}`
+    };
+    message = multerMessages[err.code] || err.message;
+  }
+
   console.error(`[Error] ${statusCode} - ${message} | ${req.method} ${req.originalUrl}`);
 
   res.status(statusCode).json({

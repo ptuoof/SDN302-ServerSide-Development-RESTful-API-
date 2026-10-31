@@ -42,7 +42,15 @@ exports.createCategory = async (req, res, next) => {
 // @access  Private (Admin)
 exports.updateCategory = async (req, res, next) => {
   try {
-    const category = await Category.findByIdAndUpdate(req.params.id, req.body, {
+    // Only allow known fields to be updated
+    const updates = {};
+    ['name', 'slug', 'icon', 'order'].forEach(field => {
+      if (req.body[field] !== undefined) {
+        updates[field] = req.body[field];
+      }
+    });
+
+    const category = await Category.findByIdAndUpdate(req.params.id, updates, {
       new: true,
       runValidators: true
     });

@@ -1,6 +1,27 @@
 const mongoose = require('mongoose');
 const createError = require('http-errors');
 const { Recipe, Category, Favorite } = require('../models');
+const escapeRegex = require('../utils/escapeRegex');
+
+// Fields a recipe owner is allowed to change (prevents mass assignment of
+// author, likesCount, isCustom, timestamps... through PUT /api/recipes/:id)
+const UPDATABLE_RECIPE_FIELDS = [
+  'title',
+  'description',
+  'imageUrl',
+  'videoUrl',
+  'prepTimeMinutes',
+  'cookTimeMinutes',
+  'servings',
+  'calories',
+  'difficulty',
+  'colorAccent',
+  'isPublic',
+  'ingredients',
+  'steps'
+];
+
+const MAX_PAGE_LIMIT = 100;
 
 // Helper to format recipe for seamless FE compatibility and SDN302 standards
 const formatRecipe = recipe => {
@@ -55,11 +76,12 @@ exports.getAllRecipes = async (req, res, next) => {
     }
 
     // 2. Search Query (Title, Description, or Ingredients)
-    if (search && search.trim() !== '') {
+    if (search && String(search).trim() !== '') {
+      const safeSearch = escapeRegex(String(search).trim());
       filter.$or = [
-        { title: { $regex: search.trim(), $options: 'i' } },
-        { description: { $regex: search.trim(), $options: 'i' } },
-        { 'ingredients.name': { $regex: search.trim(), $options: 'i' } }
+        { title: { $regex: safeSearch, $options: 'i' } },
+        { description: { $regex: safeSearch, $options: 'i' } },
+        { 'ingredients.name': { $regex: safeSearch, $options: 'i' } }
       ];
     }
 
@@ -93,7 +115,10 @@ exports.getAllRecipes = async (req, res, next) => {
       });
     }
 
-    const skip = (Number(page) - 1) * Number(limit);
+    // Pagination with safe bounds (1 <= limit <= MAX_PAGE_LIMIT)
+    const pageNum = Math.max(parseInt(page, 10) || 1, 1);
+    const limitNum = Math.min(Math.max(parseInt(limit, 10) || 50, 1), MAX_PAGE_LIMIT);
+    const skip = (pageNum - 1) * limitNum;
 
     const [total, recipes] = await Promise.all([
       Recipe.countDocuments(filter),
@@ -102,14 +127,15 @@ exports.getAllRecipes = async (req, res, next) => {
         .populate('author', 'fullName username avatar role')
         .sort(sortCriteria)
         .skip(skip)
-        .limit(Number(limit))
+        .limit(limitNum)
     ]);
 
     res.status(200).json({
       success: true,
       total,
-      page: Number(page),
-      totalPages: Math.ceil(total / Number(limit)),
+      page: pageNum,
+      limit: limitNum,
+      totalPages: Math.ceil(total / limitNum),
       recipes: recipes.map(formatRecipe)
     });
   } catch (error) {
@@ -240,13 +266,37 @@ exports.updateRecipe = async (req, res, next) => {
       return next(createError.Forbidden('You are not authorized to update this recipe'));
     }
 
-    // Handle category name update if provided
-    if (req.body.categoryName && !req.body.category) {
-      const cat = await Category.findOne({ name: req.body.categoryName });
-      if (cat) req.body.category = cat._id;
+    // Only copy whitelisted fields from the request body
+    const updates = {};
+    UPDATABLE_RECIPE_FIELDS.forEach(field => {
+      if (req.body[field] !== undefined) {
+        updates[field] = req.body[field];
+      }
+    });
+    if (updates.ingredients !== undefined && !Array.isArray(updates.ingredients)) {
+      delete updates.ingredients;
+    }
+    if (updates.steps !== undefined && !Array.isArray(updates.steps)) {
+      delete updates.steps;
     }
 
-    const updated = await Recipe.findByIdAndUpdate(id, req.body, {
+    // Resolve category: accept a valid ObjectId or a category name
+    const { category, categoryName } = req.body;
+    if (typeof category === 'string' && mongoose.Types.ObjectId.isValid(category)) {
+      const exists = await Category.exists({ _id: category });
+      if (!exists) {
+        return next(createError.BadRequest('Category does not exist'));
+      }
+      updates.category = category;
+    } else {
+      const nameToFind = categoryName || (typeof category === 'string' ? category : null);
+      if (nameToFind) {
+        const cat = await Category.findOne({ name: nameToFind });
+        if (cat) updates.category = cat._id;
+      }
+    }
+
+    const updated = await Recipe.findByIdAndUpdate(id, updates, {
       new: true,
       runValidators: true
     })

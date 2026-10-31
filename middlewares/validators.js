@@ -89,6 +89,54 @@ const validateRecipe = [
   handleValidationErrors
 ];
 
+// 2b. Recipe Update Validation Rules (all fields optional, but must be valid if sent)
+const validateRecipeUpdate = [
+  body('title')
+    .optional()
+    .trim()
+    .isLength({ min: 2 })
+    .withMessage('Recipe title must be at least 2 characters'),
+  body('description')
+    .optional()
+    .trim()
+    .notEmpty()
+    .withMessage('Recipe description cannot be empty'),
+  body('imageUrl')
+    .optional()
+    .trim()
+    .notEmpty()
+    .withMessage('Image URL cannot be empty'),
+  body('prepTimeMinutes')
+    .optional({ values: 'falsy' })
+    .isInt({ min: 0 })
+    .withMessage('Preparation time must be a positive integer'),
+  body('cookTimeMinutes')
+    .optional({ values: 'falsy' })
+    .isInt({ min: 0 })
+    .withMessage('Cooking time must be a positive integer'),
+  body('servings')
+    .optional({ values: 'falsy' })
+    .isInt({ min: 1 })
+    .withMessage('Servings must be at least 1'),
+  body('calories')
+    .optional({ values: 'falsy' })
+    .isInt({ min: 0 })
+    .withMessage('Calories must be a positive integer'),
+  body('difficulty')
+    .optional()
+    .isIn(['Dễ', 'Vừa', 'Khó'])
+    .withMessage('Difficulty must be one of: Dễ, Vừa, Khó'),
+  body('ingredients')
+    .optional()
+    .isArray()
+    .withMessage('Ingredients must be an array'),
+  body('steps')
+    .optional()
+    .isArray()
+    .withMessage('Steps must be an array'),
+  handleValidationErrors
+];
+
 // 3. Category Validation Rules
 const validateCategory = [
   body('name')
@@ -99,6 +147,41 @@ const validateCategory = [
     .trim()
     .notEmpty()
     .withMessage('Category slug is required'),
+  handleValidationErrors
+];
+
+// 3b. Category Update Validation Rules
+const validateCategoryUpdate = [
+  body('name')
+    .optional()
+    .trim()
+    .notEmpty()
+    .withMessage('Category name cannot be empty'),
+  body('slug')
+    .optional()
+    .trim()
+    .notEmpty()
+    .withMessage('Category slug cannot be empty'),
+  body('order')
+    .optional()
+    .isInt({ min: 0 })
+    .withMessage('Order must be a positive integer'),
+  handleValidationErrors
+];
+
+// 3c. Profile Update Validation Rules
+const validateProfile = [
+  body('fullName')
+    .optional()
+    .trim()
+    .notEmpty()
+    .withMessage('Full name cannot be empty')
+    .isLength({ max: 100 })
+    .withMessage('Full name must be at most 100 characters'),
+  body('avatar')
+    .optional({ values: 'null' })
+    .isString()
+    .withMessage('Avatar must be a string URL'),
   handleValidationErrors
 ];
 
@@ -124,7 +207,10 @@ module.exports = {
   validateRegister,
   validateLogin,
   validateRecipe,
+  validateRecipeUpdate,
   validateCategory,
+  validateCategoryUpdate,
+  validateProfile,
   validateShoppingItem,
   validatePantryItem,
   handleValidationErrors
