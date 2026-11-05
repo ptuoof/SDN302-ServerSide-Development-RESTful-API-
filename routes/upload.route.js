@@ -9,6 +9,9 @@ const MAX_FILES_PER_REQUEST = 5;
 // Upload a single image (form-data field: "image")
 router.post('/image', verifyToken, uploadMiddleware.single('image'), uploadController.uploadImage);
 
+// Upload a single video (form-data field: "video", max 50MB)
+router.post('/video', verifyToken, uploadMiddleware.videoUpload.single('video'), uploadController.uploadVideo);
+
 // Upload multiple images at once (form-data field: "images", max 5 files)
 router.post(
   '/images',
