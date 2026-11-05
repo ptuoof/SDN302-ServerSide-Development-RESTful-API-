@@ -4,6 +4,9 @@ const Recipe = require('./recipe.model');
 const Favorite = require('./favorite.model');
 const ShoppingItem = require('./shoppingItem.model');
 const PantryItem = require('./pantryItem.model');
+const CookHistory = require('./cookHistory.model');
+const MealEntry = require('./mealEntry.model');
+const RecipeRequest = require('./recipeRequest.model');
 
 module.exports = {
   User,
@@ -11,5 +14,8 @@ module.exports = {
   Recipe,
   Favorite,
   ShoppingItem,
-  PantryItem
+  PantryItem,
+  CookHistory,
+  MealEntry,
+  RecipeRequest
 };
