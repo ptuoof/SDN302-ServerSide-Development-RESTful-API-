@@ -4,8 +4,10 @@ Tài liệu dành cho người nối app React Native/Expo (repo `MMA301/CookFlo
 Mọi quy tắc nghiệp vụ trước đây nằm trong `AuthContext` / `RecipeContext` của app đã được chuyển sang server
 với **cùng luật** (giới hạn, bỏ dấu, gộp danh sách mua sắm...), để app chỉ cần gọi API và hiển thị kết quả.
 
-App đã có sẵn client: `src/services/api/client.js` (`apiRequest`, `setAuthToken`, `ApiError`)
-và module mẫu `src/services/api/shopping.js`.
+App đã được nối vào API (nhánh `feat/intergrate-backend` của repo MMA301): client `src/services/api/client.js`
+(`apiRequest`, `setAuthToken`, `ApiError`), mỗi tài nguyên một module trong `src/services/api/`, và
+`AuthContext` / `RecipeContext` gọi các module này. Kiểm thử hợp đồng phía app:
+`COOKFLOW_BACKEND_DIR=<repo này> npm run test:api` (trong repo MMA301).
 
 ---
 
