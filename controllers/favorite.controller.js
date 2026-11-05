@@ -1,7 +1,10 @@
+const mongoose = require('mongoose');
 const createError = require('http-errors');
 const { Favorite, Recipe } = require('../models');
+const { formatRecipe } = require('../utils/serializers');
+const { canView } = require('../utils/recipeAccess');
 
-// @desc    Get user's favorite recipes
+// @desc    Get user's favorite recipes (only recipes the user can still see)
 // @route   GET /api/favorites
 // @access  Private
 exports.getFavorites = async (req, res, next) => {
@@ -16,21 +19,14 @@ exports.getFavorites = async (req, res, next) => {
       })
       .sort({ createdAt: -1 });
 
-    const activeFavorites = favorites.filter(f => f.recipe !== null);
-    const favoriteIds = activeFavorites.map(f => f.recipe._id.toString());
-    const recipes = activeFavorites.map(f => {
-      const obj = f.recipe.toObject();
-      return {
-        ...obj,
-        id: obj._id.toString(),
-        categoryName: obj.category?.name || 'Món chính 🍲'
-      };
-    });
+    // A recipe made private by its owner (or deleted) disappears from other users' favorites
+    const activeFavorites = favorites.filter(f => f.recipe && canView(f.recipe, req.user));
+    const recipes = activeFavorites.map(f => formatRecipe(f.recipe, req.user));
 
     res.status(200).json({
       success: true,
       count: recipes.length,
-      favoriteIds,
+      favoriteIds: recipes.map(r => r.id),
       recipes
     });
   } catch (error) {
@@ -44,10 +40,10 @@ exports.getFavorites = async (req, res, next) => {
 exports.toggleFavorite = async (req, res, next) => {
   try {
     const { recipeId } = req.params;
-    const recipeExists = await Recipe.exists({ _id: recipeId });
+    const recipe = mongoose.Types.ObjectId.isValid(recipeId) ? await Recipe.findById(recipeId).select('author isPublic type') : null;
 
-    if (!recipeExists) {
-      return next(createError.NotFound('Recipe not found'));
+    if (!recipe || !canView(recipe, req.user)) {
+      return next(createError(404, 'Không tìm thấy công thức'));
     }
 
     // Atomic operations: remove if exists, otherwise create.
@@ -90,7 +86,7 @@ exports.toggleFavorite = async (req, res, next) => {
       recipeId,
       isFavorite,
       likesCount: updatedRecipe?.likesCount || 0,
-      message: isFavorite ? 'Added to favorites' : 'Removed from favorites'
+      message: isFavorite ? 'Đã thêm vào yêu thích' : 'Đã bỏ khỏi yêu thích'
     });
   } catch (error) {
     next(error);
