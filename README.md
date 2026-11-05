@@ -59,25 +59,35 @@ cd prj_sdn302/CookFlow-SDN302/CookFlow-BE
 npm install
 ```
 
-### Bước 3: Nạp dữ liệu khởi tạo (Database Seeding)
+### Bước 3: Tạo file cấu hình `.env`
+```bash
+cp .env.example .env
+# Đổi JWT_SECRET thành một chuỗi ngẫu nhiên dài
+```
+> `HOST=0.0.0.0` để điện thoại / emulator trong cùng mạng gọi được API (dùng `localhost` thì chỉ máy tính này gọi được).
+
+### Bước 4: Nạp dữ liệu khởi tạo (Database Seeding)
 ```bash
 npm run seed
 ```
-> Script sẽ tự động kết nối MongoDB và tạo:
-> * 2 tài khoản mẫu (Admin & Chef)
-> * 5 Danh mục món ăn chuẩn
-> * 6 Công thức nấu ăn chi tiết có đầy đủ nguyên liệu & bước hẹn giờ.
+> Script tự kết nối MongoDB, chạy migration rồi tạo (bỏ qua nếu đã có):
+> * 2 tài khoản mẫu giống app mobile (Admin & Chef)
+> * 5 danh mục món ăn mặc định của app
+> * 6 công thức mẫu của app (`type: "system"`, có `legacyId` = id cũ trong app như `rec_01`)
 
-### Bước 4: Khởi động máy chủ API
+### Bước 5: Khởi động máy chủ API
 ```bash
 npm run dev
-# Máy chủ lắng nghe tại: http://localhost:9999
+# Máy chủ lắng nghe tại: http://0.0.0.0:9999
 ```
+> Khi khởi động, server tự chạy **migration** để nâng cấp dữ liệu tạo bởi phiên bản API cũ (xem `CHANGELOG.md`).
 
-### Bước 5: Chạy bộ kiểm thử tự động
+### Bước 6: Chạy bộ kiểm thử tự động
 ```bash
-npm run test:api
-# Kiểm tra tự động toàn bộ 8 endpoint chính
+npm test
+# 91 ca kiểm thử E2E + kiểm thử migration, chạy trên MongoDB in-memory
+# (không cần MongoDB hay server đang chạy; lần đầu sẽ tải binary MongoDB)
+npm run test:api   # smoke test nhanh, cần server + dữ liệu seed đang chạy
 ```
 
 ---
@@ -86,68 +96,112 @@ npm run test:api
 
 | Vai trò (Role) | Email / Username | Mật khẩu | Quyền hạn |
 | :--- | :--- | :--- | :--- |
-| **👑 Admin (Quản trị viên)** | `admin@cookflow.com` (hoặc `admin`) | `123456` | Quản lý Category, duyệt/sửa/xóa mọi công thức, quản lý user |
-| **🍳 User (Bếp trưởng CookFlow)** | `chef@cookflow.com` (hoặc `chef`) | `123456` | CRUD công thức cá nhân, thả tim, đi chợ, quản lý tủ lạnh |
+| **👑 Admin (Quản trị viên)** | `admin@cookflow.demo` (hoặc `admin`) | `Admin123!` | Quản lý danh mục, tài khoản, yêu cầu/báo cáo, kho công thức chung, sửa/xóa mọi công thức |
+| **🍳 User (Đầu bếp CookFlow)** | `chef@cookflow.demo` (hoặc `chef`) | `Chef123!` | Công thức cá nhân, yêu thích, đi chợ, kho nguyên liệu, lịch sử nấu, kế hoạch bữa ăn |
+
+> Mật khẩu mới (đăng ký, đổi, đặt lại) phải giống luật của app: **≥ 8 ký tự**, độ mạnh **trung bình** trở lên.
 
 ---
 
 ## 📡 4. Danh Sách RESTful API Endpoints
 
+> Tài liệu chi tiết request/response cho app mobile: **[`docs/FE_INTEGRATION.md`](docs/FE_INTEGRATION.md)**.
+> Mọi lỗi có cùng dạng: `{ success: false, message: "<tiếng Việt>", code?, errors?, error: { status, message } }`.
+
 ### 🔑 Authentication (`/api/auth`)
-* `POST /api/auth/register`: Đăng ký tài khoản mới.
-* `POST /api/auth/login`: Đăng nhập, nhận JWT Bearer Token.
-* `GET /api/auth/me`: Lấy thông tin tài khoản đang đăng nhập (kèm Bearer Token).
-* `PUT /api/auth/profile`: Cập nhật họ tên, avatar.
+* `POST /register`: Đăng ký `{ name, email, password }` → gửi mã xác minh 6 số (chưa cấp token).
+* `POST /verify-email`: Xác minh `{ email, code }` → trả token (đăng nhập luôn).
+* `POST /resend-code`: Gửi lại mã xác minh.
+* `POST /login`: Đăng nhập `{ email, password }` (hoặc `usernameOrEmail`). Chưa xác minh → `403 EMAIL_NOT_VERIFIED`; bị khóa → `403 ACCOUNT_LOCKED`.
+* `POST /forgot-password`, `POST /reset-password`: Quên mật khẩu bằng mã 6 số.
+* `PUT /change-password`: Đổi mật khẩu (*Private*).
+* `GET /me`: Thông tin tài khoản + cài đặt (*Private*).
+* `PUT /profile`: Cập nhật tên (2–40 ký tự), avatar (*Private*).
+
+> Chưa cấu hình máy chủ mail: mã được in ra console và trả về trong trường `devCode` khi `NODE_ENV` khác `production`.
+
+### 👤 Users (`/api/users`)
+* `GET/PUT /me/settings`: Cài đặt cá nhân (dị ứng, mục tiêu kcal, âm báo...) + cờ onboarding.
+* `GET /me/data`, `POST /me/data/import`, `DELETE /me/data`: Xuất / nhập (định dạng sao lưu của app) / xóa dữ liệu cá nhân.
+* `GET /`, `POST /`, `GET /:id`, `PUT /:id`, `DELETE /:id`: Quản lý tài khoản (*Admin*) - tạo, sửa, khóa, xác minh, xóa.
 
 ### 🍲 Categories (`/api/categories`)
-* `GET /api/categories`: Lấy toàn bộ danh mục món ăn.
-* `POST /api/categories`: Tạo danh mục mới (*Admin*).
-* `PUT /api/categories/:id`: Sửa danh mục (*Admin*).
-* `DELETE /api/categories/:id`: Xóa danh mục (*Admin*).
+* `GET /`: Danh mục theo thứ tự hiển thị, kèm `recipeCount`.
+* `POST /`: Tạo danh mục chỉ cần `name` - `slug` tự sinh (*Admin*).
+* `PUT /reorder`: Sắp xếp lại `{ ids }` hoặc `{ names }` (*Admin*).
+* `PUT /:id`: Đổi tên / icon (*Admin*).
+* `DELETE /:id`: Xóa; công thức trong đó chuyển sang "Món chính 🍲"; không xóa được danh mục cuối (*Admin*).
+
+> **`slug`** là định danh không dấu dùng trong URL, sinh từ tên: `"Món chính 🍲"` → `mon-chinh`.
 
 ### 📖 Recipes (`/api/recipes`)
-* `GET /api/recipes?category=...&search=...`: Lấy danh sách công thức (hỗ trợ lọc & tìm kiếm).
-* `GET /api/recipes/:id`: Xem chi tiết 1 công thức (populate author, category).
-* `POST /api/recipes`: Tạo công thức mới (*Private*).
-* `PUT /api/recipes/:id`: Cập nhật công thức (*Owner / Admin*).
-* `DELETE /api/recipes/:id`: Xóa công thức (*Owner / Admin*).
-* `GET /api/recipes/my/created`: Lấy các công thức do user hiện tại tạo (*Private*).
+* `GET /?category=&search=&difficulty=&tag=&type=&mine=&maxCalories=&maxTime=&sort=&page=&limit=`: Danh sách công thức **người gọi được xem**; tìm kiếm không dấu.
+* `GET /:id`: Chi tiết (công thức riêng tư của người khác → 404).
+* `POST /`: Tạo công thức cá nhân; admin gửi `system: true` (hoặc `type`) để thêm vào kho chung.
+* `PUT|PATCH /:id`: Sửa từng phần (*Chủ sở hữu / Admin*). Id nguyên liệu/bước được giữ nguyên.
+* `DELETE /:id`: Xóa (*Chủ sở hữu / Admin*).
+* `GET /my/created`: Công thức do mình tạo.
+
+| `type` | Ý nghĩa | Mặc định | Ai sửa/xóa |
+| :--- | :--- | :--- | :--- |
+| `system` | Công thức mẫu có sẵn (seed) | công khai | Admin |
+| `admin` | Admin thêm vào kho chung | công khai | Admin |
+| `personal` | Người dùng tự tạo / sao chép / nhập | **riêng tư** (`isPublic: false`), chủ có thể chia sẻ | Chủ sở hữu, Admin |
 
 ### ❤️ Favorites (`/api/favorites`)
-* `GET /api/favorites`: Lấy danh sách món ăn yêu thích của user.
-* `POST /api/favorites/:recipeId/toggle`: Thả tim / Bỏ tim công thức.
+* `GET /`: Danh sách yêu thích (chỉ công thức còn xem được).
+* `POST /:recipeId/toggle`: Thả tim / bỏ tim.
 
 ### 🛒 Shopping List (`/api/shopping`)
-* `GET /api/shopping`: Lấy danh sách nguyên liệu cần mua.
-* `POST /api/shopping`: Thêm món mua tự do.
-* `POST /api/shopping/bulk`: Thêm hàng loạt nguyên liệu từ 1 công thức vào giỏ.
-* `PATCH /api/shopping/:id/toggle`: Đánh dấu đã mua / chưa mua.
-* `DELETE /api/shopping/:id`: Xóa 1 nguyên liệu khỏi giỏ.
-* `DELETE /api/shopping/clear-checked`: Xóa tất cả món đã mua xong.
+* `GET /`: Danh sách cần mua.
+* `POST /`, `POST /bulk`: Thêm món - **tự gộp** dòng trùng tên (300 g + 0,5 kg = 800 g, "Vừa đủ"...).
+* `PATCH /:id`: Sửa tên / số lượng / đơn vị, đặt `checked` (mua xong → tự thêm vào kho nếu bật `autoStockPantry`).
+* `PATCH /:id/toggle`: Đảo trạng thái đã mua.
+* `POST /restore`: Hoàn tác dòng vừa xóa.
+* `DELETE /:id`, `DELETE /clear-checked`.
 
-### 🧊 Pantry Finder (`/api/pantry`)
-* `GET /api/pantry`: Lấy danh sách nguyên liệu trong tủ lạnh.
-* `POST /api/pantry/toggle`: Thêm/Xóa nguyên liệu vào tủ lạnh.
-* `DELETE /api/pantry`: Làm rỗng tủ lạnh.
-* `GET /api/pantry/suggest-recipes`: Thuật toán tính độ trùng khớp và gợi ý món nấu được.
+### 🧊 Pantry (`/api/pantry`) - so khớp tên **không dấu**
+* `GET /`, `POST /` (thêm `{ ingredientName }` hoặc `{ names }`), `POST /remove`, `POST /toggle`, `DELETE /`.
+* `GET /suggest-recipes`: Gợi ý món theo kho.
+
+### 🍳 Cooking History (`/api/history`)
+* `GET /?recipeId=`, `POST /`, `DELETE /:id`: Lịch sử nấu (đánh giá 1–5, ghi chú), giữ 200 mục mới nhất.
+
+### 📅 Meal Plan (`/api/meal-plans`)
+* `GET /?from=&to=`, `POST /`, `PATCH /:id`, `DELETE /:id`: Nhật ký / kế hoạch bữa ăn theo ngày `YYYY-MM-DD`.
+* `POST /copy-day`: Sao chép thực đơn sang ngày khác.
+* `POST /to-shopping`: Đưa nguyên liệu các món đã lên kế hoạch vào giỏ.
+
+### 📝 Requests & Reports (`/api/requests`)
+* `POST /`, `GET /mine`, `DELETE /:id`: Người dùng gửi yêu cầu món mới / báo cáo công thức.
+* `GET /`, `PATCH /:id`: Admin duyệt, đổi trạng thái, trả lời.
+
+### 📊 Admin (`/api/admin`)
+* `GET /stats`: Số liệu tổng quan (tài khoản, công thức theo loại, danh mục, yêu cầu).
 
 ### 🖼️ Upload Media (`/api/upload`)
-* `POST /api/upload/image`: Upload 1 ảnh qua Multer (field `image`), lưu vào `public/uploads`.
-* `POST /api/upload/images`: Upload nhiều ảnh cùng lúc (field `images`, tối đa 5 file, mỗi file ≤ 5MB).
-* `GET /api/upload/files`: Liệt kê các file đã upload.
-* `GET /api/upload/download/:filename`: Tải file về (trả về dạng attachment, chặn path traversal).
+* `POST /image`: Upload 1 ảnh (field `image`, ≤ 5MB).
+* `POST /video`: Upload 1 video (field `video`, mp4/mov/m4v/webm/3gp, ≤ 50MB).
+* `POST /images`: Upload nhiều ảnh (field `images`, tối đa 5 file).
+* `GET /files`: Liệt kê các file đã upload.
+* `GET /download/:filename`: Tải file về (chặn path traversal).
 
 ---
 
 ## 🔒 Bảo Mật & Cấu Hình
-* **JWT:** `JWT_SECRET` **bắt buộc** khai báo trong `.env`. Server sẽ không khởi động nếu thiếu. Token chỉ được gửi qua header `Authorization: Bearer <token>` (không nhận qua query string).
-* **CORS:** cấu hình qua biến `CORS_ORIGIN` (danh sách origin cách nhau bởi dấu phẩy, hoặc `*`). App mobile và Postman không gửi header Origin nên luôn được phép.
-* **Chống mass assignment:** `PUT /api/recipes/:id` và `PUT /api/categories/:id` chỉ cập nhật các trường cho phép (không thể sửa `author`, `likesCount`...).
+* **JWT:** `JWT_SECRET` **bắt buộc** khai báo trong `.env`. Token chỉ gửi qua header `Authorization: Bearer <token>`. Tài khoản bị khóa / chưa xác minh bị từ chối ngay cả khi token còn hạn.
+* **Mã OTP:** chỉ lưu hash, hết hạn sau 10 phút, tối đa 5 lần nhập sai, chờ 30 giây giữa 2 lần gửi.
+* **CORS:** cấu hình qua `CORS_ORIGIN`. App mobile và Postman không gửi header Origin nên luôn được phép.
+* **Phân quyền công thức:** công thức riêng tư không lộ qua danh sách, chi tiết, yêu thích, gợi ý, lịch sử hay kế hoạch.
+* **Chống mass assignment:** chỉ các trường cho phép mới được cập nhật (không sửa được `author`, `likesCount`, `type`...).
 * **Chống RegExp injection:** từ khóa tìm kiếm được escape trước khi đưa vào `$regex`.
-* **Validation:** tất cả route POST/PUT đều được kiểm tra bằng `express-validator`.
+* **Validation:** mọi route POST/PUT/PATCH được kiểm tra bằng `express-validator`, giới hạn trùng với app (khẩu phần 1–50, thời gian ≤ 1440 phút, hẹn giờ ≤ 600 phút, kcal ≤ 5000...).
 * **Phân trang:** `limit` tối đa 100 bản ghi mỗi trang.
 
 ---
 
 ## 🧪 5. Kiểm Thử Với Postman
-Import file **`CookFlow_SDN302_API.postman_collection.json`** trực tiếp vào Postman để kiểm tra toàn bộ luồng request một cách trực quan.
+Import file **`CookFlow_SDN302_API.postman_collection.json`** vào Postman. Request **Login** tự lưu token vào biến `{{token}}`.
+
+## 📝 6. Lịch Sử Thay Đổi
+Xem **[`CHANGELOG.md`](CHANGELOG.md)** - các thay đổi để đồng bộ với app mobile CookFlow (MMA301).
