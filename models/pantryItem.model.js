@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { normalizeVi } = require('../utils/text');
 
 const pantryItemSchema = new mongoose.Schema(
   {
@@ -9,8 +10,13 @@ const pantryItemSchema = new mongoose.Schema(
     },
     ingredientName: {
       type: String,
-      required: [true, 'Ingredient name is required'],
+      required: [true, 'Tên nguyên liệu là bắt buộc'],
       trim: true
+    },
+    // Accent/case-insensitive key ("Hành lá" -> "hanh la"): one pantry row per ingredient, like the app
+    normalizedName: {
+      type: String,
+      required: true
     }
   },
   {
@@ -18,6 +24,11 @@ const pantryItemSchema = new mongoose.Schema(
   }
 );
 
-pantryItemSchema.index({ user: 1, ingredientName: 1 }, { unique: true });
+pantryItemSchema.pre('validate', function (next) {
+  this.normalizedName = normalizeVi(this.ingredientName);
+  next();
+});
+
+pantryItemSchema.index({ user: 1, normalizedName: 1 }, { unique: true });
 
 module.exports = mongoose.model('PantryItem', pantryItemSchema);
