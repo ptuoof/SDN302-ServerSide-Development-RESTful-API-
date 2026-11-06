@@ -46,8 +46,8 @@ async function runTests() {
 
     // 2. Test Login
     const login = await request('/api/auth/login', 'POST', {
-      usernameOrEmail: 'admin@cookflow.com',
-      password: '123456'
+      email: 'admin@cookflow.demo',
+      password: 'Admin123!'
     });
     console.log('✓ POST /api/auth/login ->', login.status, 'User:', login.data.user.fullName);
     const token = login.data.token;

@@ -1,15 +1,19 @@
-const createError = require('http-errors');
-const { PantryItem, Recipe } = require('../models');
-const escapeRegex = require('../utils/escapeRegex');
+const { Recipe } = require('../models');
+const { normalizeVi } = require('../utils/text');
+const { formatRecipe } = require('../utils/serializers');
+const { visibilityFilter } = require('../utils/recipeAccess');
+const pantry = require('../services/pantry.service');
 
-// @desc    Get user's pantry ingredients
+const namesFrom = body => (Array.isArray(body?.names) ? body.names : [body?.ingredientName]);
+
+// Names are compared without accents/case, like the app ("hanh la" === "Hành lá").
+
+// @desc    Get user's pantry ingredients (in the order they were added)
 // @route   GET /api/pantry
 // @access  Private
 exports.getPantry = async (req, res, next) => {
   try {
-    const items = await PantryItem.find({ user: req.user._id }).sort({ createdAt: -1 });
-    const ingredients = items.map(item => item.ingredientName);
-
+    const ingredients = await pantry.listNames(req.user._id);
     res.status(200).json({
       success: true,
       count: ingredients.length,
@@ -23,39 +27,50 @@ exports.getPantry = async (req, res, next) => {
 // @desc    Toggle ingredient in pantry
 // @route   POST /api/pantry/toggle
 // @access  Private
+// @body    { ingredientName }
 exports.togglePantryItem = async (req, res, next) => {
   try {
-    const { ingredientName } = req.body;
-    if (typeof ingredientName !== 'string' || !ingredientName.trim()) {
-      return next(createError.BadRequest('Ingredient name is required'));
-    }
-
-    const trimmedName = ingredientName.trim();
-    const existing = await PantryItem.findOne({
-      user: req.user._id,
-      ingredientName: { $regex: `^${escapeRegex(trimmedName)}$`, $options: 'i' }
-    });
-
-    let action = '';
-    if (existing) {
-      await PantryItem.findByIdAndDelete(existing._id);
-      action = 'removed';
-    } else {
-      await PantryItem.create({
-        user: req.user._id,
-        ingredientName: trimmedName
-      });
-      action = 'added';
-    }
-
-    const allItems = await PantryItem.find({ user: req.user._id });
-    const ingredients = allItems.map(item => item.ingredientName);
-
+    const ingredientName = String(req.body.ingredientName).trim();
+    const action = await pantry.toggleName(req.user._id, ingredientName);
     res.status(200).json({
       success: true,
       action,
-      ingredientName: trimmedName,
-      ingredients
+      ingredientName,
+      ingredients: await pantry.listNames(req.user._id)
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Add ingredients (already-present names are skipped, never toggled off)
+// @route   POST /api/pantry
+// @access  Private
+// @body    { ingredientName } or { names: [...] }
+exports.addPantryItems = async (req, res, next) => {
+  try {
+    const added = await pantry.addNames(req.user._id, namesFrom(req.body));
+    res.status(added.length ? 201 : 200).json({
+      success: true,
+      added,
+      ingredients: await pantry.listNames(req.user._id)
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Remove several ingredients at once (e.g. used up by a cooked dish)
+// @route   POST /api/pantry/remove
+// @access  Private
+// @body    { ingredientName } or { names: [...] }
+exports.removePantryItems = async (req, res, next) => {
+  try {
+    const removed = await pantry.removeNames(req.user._id, namesFrom(req.body));
+    res.status(200).json({
+      success: true,
+      removedCount: removed,
+      ingredients: await pantry.listNames(req.user._id)
     });
   } catch (error) {
     next(error);
@@ -67,10 +82,10 @@ exports.togglePantryItem = async (req, res, next) => {
 // @access  Private
 exports.clearPantry = async (req, res, next) => {
   try {
-    await PantryItem.deleteMany({ user: req.user._id });
+    await pantry.removeNames(req.user._id, await pantry.listNames(req.user._id));
     res.status(200).json({
       success: true,
-      message: 'Pantry cleared successfully',
+      message: 'Đã dọn sạch kho nguyên liệu',
       ingredients: []
     });
   } catch (error) {
@@ -78,17 +93,13 @@ exports.clearPantry = async (req, res, next) => {
   }
 };
 
-// @desc    Suggest recipes based on pantry ingredients
+// @desc    Suggest recipes (visible to the user) based on pantry ingredients
 // @route   GET /api/pantry/suggest-recipes
 // @access  Private
+// Note: the app has its own, richer matcher (staples + allergies); this endpoint is kept for other clients.
 exports.suggestRecipes = async (req, res, next) => {
   try {
-    const pantryItems = await PantryItem.find({ user: req.user._id });
-    const pantryNames = pantryItems.map(p => p.ingredientName.toLowerCase());
-
-    const allRecipes = await Recipe.find()
-      .populate('category', 'name slug icon')
-      .populate('author', 'fullName username avatar role');
+    const pantryNames = (await pantry.listNames(req.user._id)).map(normalizeVi);
 
     if (pantryNames.length === 0) {
       return res.status(200).json({
@@ -98,48 +109,36 @@ exports.suggestRecipes = async (req, res, next) => {
       });
     }
 
+    const allRecipes = await Recipe.find(visibilityFilter(req.user))
+      .populate('category', 'name slug icon')
+      .populate('author', 'fullName username avatar role');
+
     const scored = allRecipes.map(recipe => {
       const totalIngs = recipe.ingredients.length;
-      if (totalIngs === 0) return { recipe, matchRatio: 0, missing: [] };
-
       const matched = [];
       const missing = [];
 
       recipe.ingredients.forEach(ing => {
-        const ingLower = ing.name.toLowerCase();
-        const has = pantryNames.some(
-          pName => ingLower.includes(pName) || pName.includes(ingLower)
-        );
-        if (has) {
-          matched.push(ing.name);
-        } else {
-          missing.push(ing.name);
-        }
+        const ingKey = normalizeVi(ing.name);
+        const has = pantryNames.some(pName => ingKey.includes(pName) || pName.includes(ingKey));
+        (has ? matched : missing).push(ing.name);
       });
 
-      const matchRatio = Math.round((matched.length / totalIngs) * 100);
       return {
-        recipe: {
-          ...recipe.toObject(),
-          id: recipe._id.toString(),
-          categoryName: recipe.category?.name || 'Món chính 🍲'
-        },
+        recipe: formatRecipe(recipe, req.user),
         matchedCount: matched.length,
         totalIngredients: totalIngs,
-        matchRatio,
+        matchRatio: totalIngs ? Math.round((matched.length / totalIngs) * 100) : 0,
         missing
       };
     });
 
     scored.sort((a, b) => b.matchRatio - a.matchRatio);
 
-    const readyToCook = scored.filter(s => s.matchRatio >= 80);
-    const missingFew = scored.filter(s => s.matchRatio >= 40 && s.matchRatio < 80);
-
     res.status(200).json({
       success: true,
-      readyToCook,
-      missingFew
+      readyToCook: scored.filter(s => s.matchRatio >= 80),
+      missingFew: scored.filter(s => s.matchRatio >= 40 && s.matchRatio < 80)
     });
   } catch (error) {
     next(error);

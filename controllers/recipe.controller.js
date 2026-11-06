@@ -2,52 +2,43 @@ const mongoose = require('mongoose');
 const createError = require('http-errors');
 const { Recipe, Category, Favorite } = require('../models');
 const escapeRegex = require('../utils/escapeRegex');
-
-// Fields a recipe owner is allowed to change (prevents mass assignment of
-// author, likesCount, isCustom, timestamps... through PUT /api/recipes/:id)
-const UPDATABLE_RECIPE_FIELDS = [
-  'title',
-  'description',
-  'imageUrl',
-  'videoUrl',
-  'prepTimeMinutes',
-  'cookTimeMinutes',
-  'servings',
-  'calories',
-  'difficulty',
-  'colorAccent',
-  'isPublic',
-  'ingredients',
-  'steps'
-];
+const { tokensOf, categoryKey } = require('../utils/text');
+const { formatRecipe } = require('../utils/serializers');
+const { buildRecipeFields } = require('../utils/recipeInput');
+const { visibilityFilter, canView, canEdit } = require('../utils/recipeAccess');
+const { resolveCategory } = require('../services/category.service');
+const { DIFFICULTIES, RECIPE_TYPES, DIET_TAGS } = require('../config/limits');
 
 const MAX_PAGE_LIMIT = 100;
+const SORTABLE_FIELDS = ['createdAt', 'updatedAt', 'title', 'calories', 'prepTimeMinutes', 'cookTimeMinutes', 'servings', 'likesCount', 'difficulty'];
 
-// Helper to format recipe for seamless FE compatibility and SDN302 standards
-const formatRecipe = recipe => {
-  const obj = recipe.toObject ? recipe.toObject() : { ...recipe };
-  const catObj = obj.category && typeof obj.category === 'object' ? obj.category : null;
-  const categoryString = catObj
-    ? catObj.name
-    : typeof obj.category === 'string'
-    ? obj.category
-    : 'Món chính 🍲';
+const populateRecipe = query => query
+  .populate('category', 'name slug icon')
+  .populate('author', 'fullName username avatar role');
 
-  const recipeId = obj._id ? obj._id.toString() : obj.id;
-
-  return {
-    ...obj,
-    id: recipeId,
-    _id: recipeId,
-    category: categoryString,
-    categoryObj: catObj,
-    categoryName: categoryString
-  };
+const findRecipeOr404 = async id => {
+  if (!mongoose.Types.ObjectId.isValid(id)) throw createError(404, 'Không tìm thấy công thức');
+  const recipe = await Recipe.findById(id);
+  if (!recipe) throw createError(404, 'Không tìm thấy công thức');
+  return recipe;
 };
 
-// @desc    Get all recipes with filtering, search, sorting & pagination
+/**
+ * Recipe type requested by the client. The app sends { system: true } for an admin catalog recipe
+ * (addRecipe(data, { system: true })); `type` may also be sent explicitly.
+ * Only admins may create / change system and admin recipes.
+ */
+const requestedType = body => {
+  if (RECIPE_TYPES.includes(body.type)) return body.type;
+  if (body.system === true) return 'admin';
+  return null;
+};
+
+// @desc    Get recipes visible to the caller, with filtering, search, sorting & pagination
 // @route   GET /api/recipes
-// @access  Public
+// @access  Public (signed-in users also see their own private recipes; admins see everything)
+// @query   category (id or name), search, difficulty, maxCalories, maxTime, tag, type (system|admin|personal),
+//          mine=true (only my recipes), sort (-createdAt), page, limit (max 100)
 exports.getAllRecipes = async (req, res, next) => {
   try {
     const {
@@ -56,64 +47,60 @@ exports.getAllRecipes = async (req, res, next) => {
       difficulty,
       maxCalories,
       maxTime,
+      tag,
+      type,
+      mine,
       sort = '-createdAt',
       page = 1,
       limit = 50
     } = req.query;
 
-    const filter = {};
+    const conditions = [visibilityFilter(req.user)];
 
-    // 1. Category Filter
+    // 1. Category Filter (id, or name compared without accents/emoji like the app)
     if (category && category !== 'Tất cả') {
       if (mongoose.Types.ObjectId.isValid(category)) {
-        filter.category = category;
+        conditions.push({ category });
       } else {
-        const foundCategory = await Category.findOne({ name: category });
-        if (foundCategory) {
-          filter.category = foundCategory._id;
-        }
+        const key = categoryKey(category);
+        const found = (await Category.find()).find(cat => categoryKey(cat.name) === key || cat.slug === category);
+        // Unknown category -> no result (instead of silently ignoring the filter)
+        conditions.push({ category: found ? found._id : null });
       }
     }
 
-    // 2. Search Query (Title, Description, or Ingredients)
-    if (search && String(search).trim() !== '') {
-      const safeSearch = escapeRegex(String(search).trim());
-      filter.$or = [
-        { title: { $regex: safeSearch, $options: 'i' } },
-        { description: { $regex: safeSearch, $options: 'i' } },
-        { 'ingredients.name': { $regex: safeSearch, $options: 'i' } }
-      ];
-    }
+    // 2. Search: every word must start a word of the title, description, tags or ingredients,
+    //    ignoring accents ("ca rot" finds "Cà rốt"), like matchesSearch() in the app
+    tokensOf(search).forEach(word => {
+      conditions.push({ searchText: { $regex: `(^|[^a-z0-9])${escapeRegex(word)}`, $options: 'i' } });
+    });
 
-    // 3. Difficulty Filter
-    if (difficulty && ['Dễ', 'Vừa', 'Khó'].includes(difficulty)) {
-      filter.difficulty = difficulty;
-    }
+    // 3. Difficulty / tag / type
+    if (difficulty && DIFFICULTIES.includes(difficulty)) conditions.push({ difficulty });
+    if (tag && DIET_TAGS.includes(tag)) conditions.push({ tags: tag });
+    if (type && RECIPE_TYPES.includes(type)) conditions.push({ type });
+    if (mine === 'true' && req.user) conditions.push({ author: req.user._id });
 
     // 4. Calorie Filter
     if (maxCalories && !isNaN(Number(maxCalories))) {
-      filter.calories = { $lte: Number(maxCalories) };
+      conditions.push({ calories: { $ne: null, $lte: Number(maxCalories) } });
     }
 
     // 5. Total Cook Time Filter
     if (maxTime && !isNaN(Number(maxTime))) {
-      filter.$expr = {
-        $lte: [{ $add: ['$prepTimeMinutes', '$cookTimeMinutes'] }, Number(maxTime)]
-      };
+      conditions.push({ $expr: { $lte: [{ $add: ['$prepTimeMinutes', '$cookTimeMinutes'] }, Number(maxTime)] } });
     }
 
-    // Build Sorting Criteria
-    let sortCriteria = {};
-    if (sort) {
-      const parts = sort.split(',');
-      parts.forEach(part => {
-        if (part.startsWith('-')) {
-          sortCriteria[part.substring(1)] = -1;
-        } else {
-          sortCriteria[part] = 1;
-        }
-      });
-    }
+    const filter = { $and: conditions };
+
+    // Sorting (only known fields)
+    const sortCriteria = {};
+    String(sort).split(',').forEach(part => {
+      const field = part.replace(/^-/, '').trim();
+      if (SORTABLE_FIELDS.includes(field)) sortCriteria[field] = part.startsWith('-') ? -1 : 1;
+    });
+    if (!Object.keys(sortCriteria).length) sortCriteria.createdAt = -1;
+    sortCriteria._id = sortCriteria._id || -1;
 
     // Pagination with safe bounds (1 <= limit <= MAX_PAGE_LIMIT)
     const pageNum = Math.max(parseInt(page, 10) || 1, 1);
@@ -122,12 +109,7 @@ exports.getAllRecipes = async (req, res, next) => {
 
     const [total, recipes] = await Promise.all([
       Recipe.countDocuments(filter),
-      Recipe.find(filter)
-        .populate('category', 'name slug icon')
-        .populate('author', 'fullName username avatar role')
-        .sort(sortCriteria)
-        .skip(skip)
-        .limit(limitNum)
+      populateRecipe(Recipe.find(filter)).sort(sortCriteria).skip(skip).limit(limitNum)
     ]);
 
     res.status(200).json({
@@ -136,7 +118,7 @@ exports.getAllRecipes = async (req, res, next) => {
       page: pageNum,
       limit: limitNum,
       totalPages: Math.ceil(total / limitNum),
-      recipes: recipes.map(formatRecipe)
+      recipes: recipes.map(r => formatRecipe(r, req.user))
     });
   } catch (error) {
     next(error);
@@ -145,26 +127,15 @@ exports.getAllRecipes = async (req, res, next) => {
 
 // @desc    Get single recipe by ID
 // @route   GET /api/recipes/:id
-// @access  Public
+// @access  Public (private recipes: owner + admin only - others get 404)
 exports.getRecipeById = async (req, res, next) => {
   try {
-    const { id } = req.params;
-    let recipe;
-
-    if (mongoose.Types.ObjectId.isValid(id)) {
-      recipe = await Recipe.findById(id)
-        .populate('category', 'name slug icon')
-        .populate('author', 'fullName username avatar role');
+    const recipe = await findRecipeOr404(req.params.id);
+    if (!canView(recipe, req.user)) {
+      return next(createError(404, 'Không tìm thấy công thức'));
     }
-
-    if (!recipe) {
-      return next(createError.NotFound('Recipe not found'));
-    }
-
-    res.status(200).json({
-      success: true,
-      recipe: formatRecipe(recipe)
-    });
+    const full = await populateRecipe(Recipe.findById(recipe._id));
+    res.status(200).json({ success: true, recipe: formatRecipe(full, req.user) });
   } catch (error) {
     next(error);
   }
@@ -173,175 +144,110 @@ exports.getRecipeById = async (req, res, next) => {
 // @desc    Create new recipe
 // @route   POST /api/recipes
 // @access  Private
+// @body    recipe fields as sent by the app (title, description, imageUrl, videoUrl, category (name or id),
+//          prepTimeMinutes, cookTimeMinutes, servings, calories, nutrition, difficulty, tags, colorAccent,
+//          ingredients[], steps[], copiedFrom, variantOf, aiChanges[], isPublic)
+//          + type ('personal' default; 'admin' / 'system' admin only) or system:true (= type 'admin')
 exports.createRecipe = async (req, res, next) => {
   try {
-    const {
-      title,
-      description,
-      imageUrl,
-      videoUrl,
-      category,
-      categoryName,
-      prepTimeMinutes,
-      cookTimeMinutes,
-      servings,
-      calories,
-      difficulty,
-      colorAccent,
-      ingredients,
-      steps
-    } = req.body;
-
-    if (!title || !description || !imageUrl) {
-      return next(createError.BadRequest('Title, description, and image URL are required'));
+    const isAdmin = req.user.role === 'admin';
+    const type = requestedType(req.body) || 'personal';
+    if (type !== 'personal' && !isAdmin) {
+      return next(createError(403, 'Chỉ quản trị viên được thêm công thức vào kho công thức chung', { code: 'FORBIDDEN' }));
     }
 
-    // Resolve Category ID
-    let categoryId = category;
-    if (!categoryId || !mongoose.Types.ObjectId.isValid(categoryId)) {
-      const targetCatName = categoryName || category || 'Món nhanh ⚡';
-      let foundCat = await Category.findOne({ name: targetCatName });
-      if (!foundCat) {
-        foundCat = await Category.findOne();
-      }
-      categoryId = foundCat ? foundCat._id : null;
+    const fields = buildRecipeFields(req.body);
+    const category = await resolveCategory(req.body.categoryId || req.body.category || req.body.categoryName);
+    if (!category) {
+      return next(createError(400, 'Chưa có danh mục nào. Hãy tạo danh mục trước.'));
     }
-
-    if (!categoryId) {
-      return next(createError.BadRequest('Valid category is required'));
-    }
-
-    const authorId = req.user?._id || req.userId;
 
     const recipe = await Recipe.create({
-      title,
-      description,
-      imageUrl,
-      videoUrl: videoUrl || '',
-      category: categoryId,
-      author: authorId,
-      prepTimeMinutes: Number(prepTimeMinutes) || 10,
-      cookTimeMinutes: Number(cookTimeMinutes) || 15,
-      servings: Number(servings) || 2,
-      calories: Number(calories) || 250,
-      difficulty: difficulty || 'Dễ',
-      colorAccent: colorAccent || '#FF6B6B',
-      isCustom: true,
-      isPublic: true,
-      ingredients: Array.isArray(ingredients) ? ingredients : [],
-      steps: Array.isArray(steps) ? steps : []
+      ...fields,
+      category: category._id,
+      author: req.user._id,
+      type,
+      // personal recipes are private unless the owner shares them; catalog recipes are public
+      isPublic: typeof fields.isPublic === 'boolean' ? fields.isPublic : type !== 'personal'
     });
 
-    const populated = await Recipe.findById(recipe._id)
-      .populate('category', 'name slug icon')
-      .populate('author', 'fullName username avatar role');
-
+    const populated = await populateRecipe(Recipe.findById(recipe._id));
     res.status(201).json({
       success: true,
-      message: 'Recipe created successfully',
-      recipe: formatRecipe(populated)
+      message: type === 'personal' ? 'Đã lưu công thức của bạn' : 'Đã thêm vào kho công thức',
+      recipe: formatRecipe(populated, req.user)
     });
   } catch (error) {
     next(error);
   }
 };
 
-// @desc    Update recipe
-// @route   PUT /api/recipes/:id
-// @access  Private
+// @desc    Update recipe (partial: only the fields sent are changed)
+// @route   PUT /api/recipes/:id   (PATCH is accepted too)
+// @access  Private: owner of a personal recipe, or admin (system/admin recipes: admin only)
 exports.updateRecipe = async (req, res, next) => {
   try {
-    const { id } = req.params;
-    const recipe = await Recipe.findById(id);
-
-    if (!recipe) {
-      return next(createError.NotFound('Recipe not found'));
+    const recipe = await findRecipeOr404(req.params.id);
+    if (!canEdit(recipe, req.user)) {
+      // Do not reveal private recipes of other users
+      if (!canView(recipe, req.user)) return next(createError(404, 'Không tìm thấy công thức'));
+      return next(createError(403, 'Bạn không có quyền sửa công thức này', { code: 'FORBIDDEN' }));
     }
 
-    const userId = (req.user?._id || req.userId).toString();
-    const userRole = req.user?.role || req.role;
-
-    // Check ownership or admin role
-    if (recipe.author.toString() !== userId && userRole !== 'admin') {
-      return next(createError.Forbidden('You are not authorized to update this recipe'));
+    const isAdmin = req.user.role === 'admin';
+    const type = requestedType(req.body);
+    if (type && type !== recipe.type) {
+      if (!isAdmin) return next(createError(403, 'Chỉ quản trị viên được đổi loại công thức', { code: 'FORBIDDEN' }));
+      recipe.type = type;
     }
 
-    // Only copy whitelisted fields from the request body
-    const updates = {};
-    UPDATABLE_RECIPE_FIELDS.forEach(field => {
-      if (req.body[field] !== undefined) {
-        updates[field] = req.body[field];
-      }
+    // Whitelisted fields only (author, likesCount, type... cannot be mass-assigned)
+    const fields = buildRecipeFields(req.body, { partial: true });
+    if (fields.title === '') {
+      return next(createError(400, 'Tên công thức là bắt buộc'));
+    }
+    Object.entries(fields).forEach(([key, value]) => {
+      recipe.set(key, value);
     });
-    if (updates.ingredients !== undefined && !Array.isArray(updates.ingredients)) {
-      delete updates.ingredients;
-    }
-    if (updates.steps !== undefined && !Array.isArray(updates.steps)) {
-      delete updates.steps;
-    }
 
-    // Resolve category: accept a valid ObjectId or a category name
-    const { category, categoryName } = req.body;
-    if (typeof category === 'string' && mongoose.Types.ObjectId.isValid(category)) {
-      const exists = await Category.exists({ _id: category });
-      if (!exists) {
-        return next(createError.BadRequest('Category does not exist'));
-      }
-      updates.category = category;
-    } else {
-      const nameToFind = categoryName || (typeof category === 'string' ? category : null);
-      if (nameToFind) {
-        const cat = await Category.findOne({ name: nameToFind });
-        if (cat) updates.category = cat._id;
-      }
+    const categoryInput = req.body.categoryId ?? req.body.category ?? req.body.categoryName;
+    if (categoryInput !== undefined) {
+      const category = await resolveCategory(categoryInput);
+      if (category) recipe.category = category._id;
     }
 
-    const updated = await Recipe.findByIdAndUpdate(id, updates, {
-      new: true,
-      runValidators: true
-    })
-      .populate('category', 'name slug icon')
-      .populate('author', 'fullName username avatar role');
-
+    await recipe.save();
+    const updated = await populateRecipe(Recipe.findById(recipe._id));
     res.status(200).json({
       success: true,
-      message: 'Recipe updated successfully',
-      recipe: formatRecipe(updated)
+      message: 'Đã cập nhật công thức',
+      recipe: formatRecipe(updated, req.user)
     });
   } catch (error) {
     next(error);
   }
 };
 
-// @desc    Delete recipe
+// @desc    Delete recipe (and the favorites pointing at it)
 // @route   DELETE /api/recipes/:id
-// @access  Private
+// @access  Private: owner of a personal recipe, or admin
 exports.deleteRecipe = async (req, res, next) => {
   try {
-    const { id } = req.params;
-    const recipe = await Recipe.findById(id);
-
-    if (!recipe) {
-      return next(createError.NotFound('Recipe not found'));
-    }
-
-    const userId = (req.user?._id || req.userId).toString();
-    const userRole = req.user?.role || req.role;
-
-    // Check ownership or admin role
-    if (recipe.author.toString() !== userId && userRole !== 'admin') {
-      return next(createError.Forbidden('You are not authorized to delete this recipe'));
+    const recipe = await findRecipeOr404(req.params.id);
+    if (!canEdit(recipe, req.user)) {
+      if (!canView(recipe, req.user)) return next(createError(404, 'Không tìm thấy công thức'));
+      return next(createError(403, 'Bạn không có quyền xóa công thức này', { code: 'FORBIDDEN' }));
     }
 
     await Promise.all([
-      Recipe.findByIdAndDelete(id),
-      Favorite.deleteMany({ recipe: id })
+      Recipe.deleteOne({ _id: recipe._id }),
+      Favorite.deleteMany({ recipe: recipe._id })
     ]);
 
     res.status(200).json({
       success: true,
-      message: 'Recipe deleted successfully',
-      deletedId: id
+      message: 'Đã xóa công thức',
+      deletedId: recipe._id.toString()
     });
   } catch (error) {
     next(error);
@@ -353,16 +259,12 @@ exports.deleteRecipe = async (req, res, next) => {
 // @access  Private
 exports.getMyRecipes = async (req, res, next) => {
   try {
-    const authorId = req.user?._id || req.userId;
-    const recipes = await Recipe.find({ author: authorId })
-      .populate('category', 'name slug icon')
-      .populate('author', 'fullName username avatar role')
-      .sort({ createdAt: -1 });
+    const recipes = await populateRecipe(Recipe.find({ author: req.user._id })).sort({ createdAt: -1 });
 
     res.status(200).json({
       success: true,
       count: recipes.length,
-      recipes: recipes.map(formatRecipe)
+      recipes: recipes.map(r => formatRecipe(r, req.user))
     });
   } catch (error) {
     next(error);

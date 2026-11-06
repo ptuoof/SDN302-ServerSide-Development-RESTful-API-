@@ -12,13 +12,34 @@ const buildFileUrl = (req, filename) => `${req.protocol}://${req.get('host')}/up
 exports.uploadImage = async (req, res, next) => {
   try {
     if (!req.file) {
-      return next(createError.BadRequest('Please upload an image file'));
+      return next(createError(400, 'Hãy chọn một tệp ảnh'));
     }
 
     res.status(201).json({
       success: true,
-      message: 'Image uploaded successfully',
+      message: 'Đã tải ảnh lên',
       imageUrl: buildFileUrl(req, req.file.filename),
+      fileName: req.file.filename,
+      size: req.file.size
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Upload a video (recipe video or step video picked from the phone album), max 50MB
+// @route   POST /api/upload/video   (form-data field: "video")
+// @access  Private
+exports.uploadVideo = async (req, res, next) => {
+  try {
+    if (!req.file) {
+      return next(createError(400, 'Hãy chọn một tệp video'));
+    }
+
+    res.status(201).json({
+      success: true,
+      message: 'Đã tải video lên',
+      videoUrl: buildFileUrl(req, req.file.filename),
       fileName: req.file.filename,
       size: req.file.size
     });
@@ -33,7 +54,7 @@ exports.uploadImage = async (req, res, next) => {
 exports.uploadMultipleImages = async (req, res, next) => {
   try {
     if (!req.files || req.files.length === 0) {
-      return next(createError.BadRequest('Please upload at least one image file'));
+      return next(createError(400, 'Hãy chọn ít nhất một tệp ảnh'));
     }
 
     const files = req.files.map(file => ({
@@ -45,7 +66,7 @@ exports.uploadMultipleImages = async (req, res, next) => {
 
     res.status(201).json({
       success: true,
-      message: `${files.length} image(s) uploaded successfully`,
+      message: `Đã tải lên ${files.length} ảnh`,
       count: files.length,
       files
     });
@@ -97,7 +118,7 @@ exports.downloadFile = async (req, res, next) => {
     const filePath = path.join(uploadDir, safeName);
 
     if (safeName.startsWith('.') || !fs.existsSync(filePath)) {
-      return next(createError.NotFound('File not found'));
+      return next(createError(404, 'Không tìm thấy tệp'));
     }
 
     res.download(filePath, safeName, err => {

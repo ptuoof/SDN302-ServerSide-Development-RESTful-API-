@@ -1,30 +1,39 @@
 const mongoose = require('mongoose');
+const { DEFAULT_AMOUNT } = require('../config/limits');
 
 const shoppingItemSchema = new mongoose.Schema(
   {
     user: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
-      required: true
+      required: true,
+      index: true
     },
     name: {
       type: String,
-      required: [true, 'Item name is required'],
+      required: [true, 'Tên món cần mua là bắt buộc'],
       trim: true
     },
     amount: {
       type: String,
-      default: '1'
+      default: DEFAULT_AMOUNT
     },
     unit: {
       type: String,
-      default: 'phần'
+      default: ''
     },
+    // Where the row comes from; merged rows list every source: "Phở bò, Kế hoạch bữa ăn"
     recipeTitle: {
       type: String,
       default: 'Mua tự do'
     },
     checked: {
+      type: Boolean,
+      default: false
+    },
+    // true when ticking this row put the ingredient into the pantry (autoStockPantry),
+    // so un-ticking by mistake takes it back out — but never an item that was already there.
+    stockedToPantry: {
       type: Boolean,
       default: false
     }

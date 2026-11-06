@@ -5,14 +5,14 @@ const authorizeRole = (...allowedRoles) => {
     const role = req.user?.role || req.role;
 
     if (!role) {
-      return next(createError.Forbidden('Access denied: User role undefined'));
+      return next(createError(403, 'Không xác định được quyền của tài khoản', { code: 'FORBIDDEN' }));
     }
 
     if (!allowedRoles.includes(role)) {
       return next(
-        createError.Forbidden(
-          `Access denied: Requires role [${allowedRoles.join(', ')}], but current role is [${role}]`
-        )
+        createError(403, `Bạn không có quyền thực hiện thao tác này (cần quyền: ${allowedRoles.join(', ')})`, {
+          code: 'FORBIDDEN'
+        })
       );
     }
 

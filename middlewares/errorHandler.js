@@ -1,48 +1,73 @@
+// Centralized error handler. Every error response has the same shape so the app needs one parser:
+// {
+//   success: false,
+//   message: 'Thông báo hiển thị được cho người dùng (tiếng Việt)',
+//   code: 'EMAIL_NOT_VERIFIED' | 'ACCOUNT_LOCKED' | ...   (optional, machine-readable)
+//   errors: [{ field, message, value }]                     (optional, validation details)
+//   error: { status, message }                              (kept for backward compatibility)
+// }
 const errorHandler = (err, req, res, next) => {
-  let statusCode = err.status || 500;
-  let message = err.message || 'Internal Server Error';
+  let statusCode = err.status || err.statusCode || 500;
+  let message = err.message || 'Lỗi máy chủ nội bộ';
+  let errors = Array.isArray(err.errors) ? err.errors : undefined;
 
-  // Handle Mongoose Bad ObjectId (CastError)
+  // Mongoose Bad ObjectId (CastError)
   if (err.name === 'CastError') {
     statusCode = 400;
-    message = `Resource not found with invalid ID: ${err.value}`;
+    message = `ID không hợp lệ: ${err.value}`;
   }
 
-  // Handle Mongoose Validation Error
+  // Mongoose Validation Error
   if (err.name === 'ValidationError') {
     statusCode = 400;
-    message = Object.values(err.errors)
-      .map(val => val.message)
-      .join(', ');
+    errors = Object.values(err.errors).map(val => ({ field: val.path, message: val.message, value: val.value }));
+    message = errors.map(e => e.message).join(', ');
   }
 
-  // Handle Mongoose Duplicate Key (11000)
+  // Mongoose Duplicate Key (11000)
   if (err.code === 11000) {
-    statusCode = 400;
-    const field = Object.keys(err.keyValue)[0];
-    message = `Duplicate value entered for ${field} field. Please choose another value.`;
+    statusCode = 409;
+    const field = Object.keys(err.keyValue || {})[0] || 'dữ liệu';
+    message = `Giá trị của trường "${field}" đã tồn tại. Hãy chọn giá trị khác.`;
   }
 
-  // Handle Multer upload errors (file too large, too many files, wrong field name)
+  // Multer upload errors (file too large, too many files, wrong field name)
   if (err.name === 'MulterError') {
     statusCode = 400;
     const multerMessages = {
-      LIMIT_FILE_SIZE: 'File is too large. Maximum size is 5MB',
-      LIMIT_FILE_COUNT: 'Too many files uploaded',
-      LIMIT_UNEXPECTED_FILE: `Unexpected file field: ${err.field}`
+      LIMIT_FILE_SIZE: 'Tệp quá lớn so với giới hạn cho phép',
+      LIMIT_FILE_COUNT: 'Tải lên quá nhiều tệp cùng lúc',
+      LIMIT_UNEXPECTED_FILE: `Trường tệp không hợp lệ: ${err.field}`
     };
     message = multerMessages[err.code] || err.message;
   }
 
-  console.error(`[Error] ${statusCode} - ${message} | ${req.method} ${req.originalUrl}`);
+  // Malformed JSON body
+  if (err.type === 'entity.parse.failed') {
+    statusCode = 400;
+    message = 'Dữ liệu gửi lên không phải JSON hợp lệ';
+  }
 
-  res.status(statusCode).json({
+  if (statusCode >= 500 && process.env.NODE_ENV === 'production') {
+    message = 'Lỗi máy chủ nội bộ';
+  }
+
+  if (process.env.NODE_ENV !== 'test' || statusCode >= 500) {
+    console.error(`[Error] ${statusCode} - ${message} | ${req.method} ${req.originalUrl}`);
+  }
+
+  const body = {
     success: false,
+    message,
     error: {
       status: statusCode,
       message
     }
-  });
+  };
+  if (typeof err.code === 'string') body.code = err.code;
+  if (errors) body.errors = errors;
+
+  res.status(statusCode).json(body);
 };
 
 module.exports = errorHandler;
